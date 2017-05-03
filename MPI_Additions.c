@@ -10,26 +10,32 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#inlcude "MPI_Additions"
+#include "MPI_Additions"
 
+/****************************************************
+ * File Constants                                   *
+ ****************************************************/
 static int _dest;
 static int _source;
 static int _my_rank;
 static int _my_proc;
 
+static int _my_grid_coord[3]; //Position of _my_rank in grid
+static int _grid_dim[3];      //Overal Dimensions of grid
+static int _my_local_dim[3];  //Local dimension of the spatial
+// region that _my_rank is responsible for
+
 static bool _log;
 static char _my_rank_log[100];
+static int _my_fd;
+static int _my_pos;
 
 MPI_Status  _status;
 
-int init_MPI_Additions(void){
-  MPI_Comm_rank(MPI_COMM_WORLD,&_my_rank);
-  MPI_Comm_size(MPI_COMM_WORLD,&_my_proc);
-}
-
-static inline double _stdDev(double mean, int iter){
-
-}
+/****************************************************
+ * MPI Functions                                    *
+ ****************************************************/
+/* Internal Functions                               */
 
 static inline void _sendDouble(int number, void ** data){
 
@@ -72,9 +78,9 @@ static inline void _recvInt(int number, void ** data){
 
   int * ints = (int *) data;
 
-  MPI_Recv(doubles       ,
+  MPI_Recv(ints          ,
            number        ,
-           MPI_INT    ,
+           MPI_INT       ,
            _source       ,
            0             ,
            MPI_COMM_WORLD,
@@ -95,11 +101,11 @@ static inline void _sendChar(int number, void ** data){
 
 static inline void _recvChar(int number, void ** data){
 
-  int * ints = (int *) data;
+  char * chars = (char *) data;
 
-  MPI_Recv(doubles       ,
+  MPI_Recv(chars         ,
            number        ,
-           MPI_INT    ,
+           MPI_CHAR      ,
            _source       ,
            0             ,
            MPI_COMM_WORLD,
@@ -120,7 +126,7 @@ static inline void _send(int number, void ** data, void (*fun)(int, void **)){
 
   }
 
-  *fun(number,data);
+  (*fun)(number,data);
 }
 
 static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
@@ -135,14 +141,14 @@ static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
   if(log){
 
   }
-  *fun(number,data);
+  (*fun)(number,data);
 }
 
 static inline void _send_recv(int number,
                               void ** data,
                               void (*send_fun)(int,void**),
                               void (*recv_fun)(int,void**)){
-  if(my_rank%2==0){
+  if(_my_rank%2==0){
     _send(number,data,send_fun);
   }else{
     _recv(number,data,recv_fun);
@@ -153,7 +159,7 @@ static inline void _recv_send(int number,
                               void ** data,
                               void (*send_fun)(int,void**),
                               void (*recv_fun)(int,void**)){
-  if(my_rank%2==0){
+  if(_my_rank%2==0){
     _recv(number,data,recv_fun);
   }else{
     _send(number,data,send_fun);
@@ -162,24 +168,30 @@ static inline void _recv_send(int number,
 
 static inline void _pingpong(int number,
                              void ** data,
-                             void (*send_fun)(int, void **)
-                             void (*recv_run)(int, void **)){
+                             void (*send_fun)(int, void **),
+                             void (*recv_fun)(int, void **)){
 
   _dest = _my_rank + 1;
   _source = _my_rank - 1;
   _send_recv(number  ,
              data    ,
-             send_fun,
-             recv_fun);
+             (*send_fun),
+             (*recv_fun));
 
-  _source = _my_rank+1;
-  _dest = _my_rank-1;
+  _source = _my_rank + 1;
+  _dest = _my_rank - 1;
   _recv_send(number  ,
              data    ,
-             send_fun,
-             recv_fun);
+             (*send_fun),
+             (*recv_fun));
 }
 
+
+/* External Functions                               */
+
+/* test_type 1 - is linear increase in size          *
+ * test_type ~1 - is an exponential increase in size */
+// res_lin is the resolution 
 int pingpong(int test_type,
              int max_byte ,
              int res_lin  ){
@@ -193,34 +205,339 @@ int pingpong(int test_type,
   int num_bytes = 0;
   int inc_bytes = max_byte/res_lin;
 
+  char * bytes = NULL;
+
   // Linear increase in message size
 
   while(num_bytes<max_byte){
 
     // Allocate memory
-    char * bytes = calloc(bytes,sizeof(char));
+    bytes = realloc(bytes,sizeof(char)*num_bytes);
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     double t_start = MPI_Wtime();
 
-    _pingpong(number_bytes,
-              data,
-              &sendChar,
-              &recvChar);
+    _pingpong(num_bytes,
+              bytes,
+              &_sendChar,
+              &_recvChar);
 
     double t_finish = MPI_Wtime();
 
-    double t_elapsed = (finish-start)/2.0;
+    // Divide by 2.0 because there are a total of two messages
+    // message one from proc 0 to 1 and then from proc 1 to 0.
+    double t_elapsed = (t_finish-t_start)/2.0;
 
     // Linear increase in message size
     if(test_type){
       num_bytes += inc_bytes;
     // else exponential increase in data size
     }else{
-      num_bytes = (int) pow(2.0,power)
+      num_bytes = (int) pow(2.0,power);
       power++;
     }
+
   }
+
+  if(bytes) free(bytes);
+
   return 0;
 }
+
+void init_MPI_Additions(void){
+  MPI_Comm_rank(MPI_COMM_WORLD,&_my_rank);
+  MPI_Comm_size(MPI_COMM_WORLD,&_my_proc);
+  sprintf(_my_rank_log,"file_num%d.log",_my_rank);
+}
+
+// If given a volume, this function will 
+// detemine the optimal grid the processors
+// will map to the the volume. GridDim determines what
+// dimensiosn we are allowed to map the processor grid too
+// if GridDim is 2 even if we have a volume we are mapping 
+// to the actual processor grid will be two dimensional 
+void calibrateGrid(float Dimensions[3], int GridDim){
+
+  if( Dimensions[0] < 0 || Dimensions[1] < 0 || Dimensions[2] < 0){
+    fprintf(stderr,"ERROR Dimension less than 0 in calibrateGrid\n");
+    return;
+  }
+
+  // Determine if lattice can be split
+  // up in a 1d 2d or 3d lattice
+  int proc_max;
+  int proc_mid;
+  int proc_min;
+
+  int grid_hei;
+  int grid_wid;
+  int grid_len;
+
+  /* Following section determines how best to split up
+   * the system, it is assumed that the work will be
+   * distributed evenly across the system */
+  int * array = malloc(sizeof(int));
+
+  int len_array = primeFactors(num_proc, &array);
+
+  for(int i=0;i<len_array;i++){
+    printf("array[%d] %d\n",i,array[i]);
+  }
+
+  int val1 = 1;
+  int val2 = 1;
+  int val3 = 1;
+
+  /* Determinig how to split up the system based on
+   * the system up dimentions and the number
+   * of processors. We are trying to keep the size
+   * of the blocks as cubic as possible. Cubic volumes
+   * have smaller surface are when compared to rectangular
+   * cuboid like volumes. */
+
+  /* Here we are making the dimensions as cubic as possible */
+  for(int i=len_array-1;i>=0;i--){
+    if(val1<=val2 && val1<= val3){
+      val1 = array[i]*val1;
+    }else if(val2 <= val3 && GridDim>=2){
+      val2 = array[i]*val2;
+    }else if(GridDim>=3){
+      val3 = array[i]*val3;
+    }
+  }
+
+  /* Here we are mapping the processors to the dimensions */
+  if(val1>=val2 && val1>= val3){
+    proc_max = val1;
+    if(val2>=val3){
+      proc_mid = val2;
+      proc_min = val3;
+    }else{
+      proc_mid = val3;
+      proc_min = val2;
+    }
+  }else if(val2>=val1 && val2>=val3){
+    proc_max = val2;
+    if(val1>=val3){
+      proc_mid = val1;
+      proc_min = val3;
+    }else{
+      proc_mid = val3;
+      proc_min = val1;
+    }
+
+  }else{
+    proc_max = val3;
+    if(val1>= val2){
+      proc_mid = val1;
+      proc_min = val2;
+    }else{
+      proc_mid = val2;
+      proc_min = val1;
+    }
+  }
+
+  if(len>=wid && len>=hei){
+    grid_len = proc_max;
+    if(wid>=hei){
+      grid_wid = proc_mid;
+      grid_hei = proc_min;
+    }else{
+      grid_hei = proc_mid;
+      grid_wid = proc_min;
+    }
+  }else if(wid>=len && wid>=hei){
+    grid_wid = proc_max;
+    if(len>=hei){
+      grid_len = proc_mid;
+      grid_hei = proc_min;
+    }else{
+      grid_hei = proc_mid;
+      grid_len = proc_min;
+    }
+  }else{
+    grid_hei = proc_max;
+    if(len>=wid){
+      grid_len = proc_mid;
+      grid_wid = proc_min;
+    }else{
+      grid_wid = proc_mid;
+      grid_len = proc_min;
+    }
+
+  }
+
+  _grid_dim[0] = grid_len;
+  _grid_dim[1] = grid_wid;
+  _grid_dim[2] = grid_hei;
+
+  int local_len = len / _grid_dim[0];
+  int local_wid = wid / _grid_dim[1];
+  int local_hei = hei / _grid_dim[2];
+
+  /* Determine where current rank fits into the grid */
+  _my_grid_coord[0] = _my_rank % _grid_dim[0];
+  _my_grid_coord[1] = (_my_rank % (_grid_dim[0]*_grid_dim[1]))/_grid_dim[0];
+  _my_grid_coord[2] = _my_rank / (_grid_dim[0]*_grid_dim[1]);
+
+  //Determine how to split up grid
+  //Add extra based on rank
+  if( len % _grid_dim[0] > _my_grid_coord[0] ){
+    local_len++;
+  }
+  if( wid % _grid_dim[1] > _my_grid_coord[1] ){
+    local_wid++;
+  }
+  if( hei % _grid_dim[2] > _my_grid_coord[2] ){
+    local_hei++;
+  }
+
+  _my_local_dim[0] = local_len;
+  _my_local_dim[1] = local_wid;
+  _my_local_dim[2] = local_hei;
+
+  printf("rank %d local_len %d local_wid %d local_hei %d\n",_my_rank,local_len,_my_local_wid,local_hei);
+  printf("rank %d grid_len %d grid_wid %d grid_hei
+%d\n",_my_rank,_my_grid_dim[0],_my_grid_dim[1],_my_grid_dim[2]);
+
+  free(array);
+
+  return 0;
+}
+
+/****************************************************
+ * File IO Functions                                *
+ ****************************************************/
+/* Internal Functions                               */
+/* External Functions                               */
+
+// Function designed to switch from printing to 
+// stdout, to a file specific to the rank
+void switchStdout(void){
+  fflush(stdout);
+  fgetpos(stdout,&_my_pos);
+  _my_fd = dup(fileno(stdout));
+  freopen(_my_rank_log,"w",stdout);
+}
+
+// Function designed to switch from print to 
+// a file specific to the rank back to stdout
+void revertStdout(void){
+  fflush(stdout);
+  dup2(_my_fd, fileno(stdout));
+  close(_my_fd);
+  clearerr(stdout);
+  fsetpos(stdout,&_my_pos);
+}
+
+/****************************************************
+ * Statistics Functions                             *
+ ****************************************************/
+/* Internal Functions                               */
+
+static inline double _stdDev(double mean, double val, int iter){
+  return pow(pow(val-mean,2)/((double)iter+1.0),(1.0/2.0));
+}
+
+/* External Functions                               */
+int calcStats(int iter,double val,double stats[4]){
+  stats[0] += val;                                     // sum
+  stats[1]  = sum[0]/(iter+1);                         // running mean
+  stats[2]  = _stdDev(stats[1],val,iter);              // standard deviation
+  stats[3]  = 1.96*stats[2]/pow((double)iter,1.0/2.0); // error
+  return 0;
+}
+
+int genStatFile( char * file_name, 
+                 int iter, 
+                 int num_bytes,
+                 double stats[4]){
+
+  FILE *fp;
+  fp = fopen(file_name,"a+");
+  fprintf(fp,"Iter %8d ",iter);
+  fprintf(fp,"Bytes %8d ",num_bytes);
+  fprintf(fp,"Mean %12g ",stats[1]);
+  fprintf(fp,"Dev %12g ",stats[2]);
+  fprintf(fp,"Error+- %12g\n",stats[3]);
+  fclose(fp);
+}
+
+/****************************************************
+ * Math Functions                                   *
+ ****************************************************/
+/* Internal Functions                               */
+
+/* External Functions                               */
+
+/* Function is designed to print all prime factors  *
+ * a given number n                                 */
+int primeFactors(int n, int ** array){
+
+  if(!array) return -1;
+ 
+  
+    int size = 0;
+    if(n==1) {
+        (*array)[0] = 1;
+        return 1;
+    }
+    // Print the number of 2s that divide n
+    while (n%2 == 0){
+        n = n/2;
+        if(size>0){
+            int * temp = realloc(*array,sizeof(int)*(size+1));
+            if(!temp){
+                fprintf(stderr,"ERROR temp array is NULL\n");
+                exit(1);
+            }
+            *array = temp;
+        }
+
+        (*array)[size] = 2;
+        size++;
+    }
+
+      // n must be odd at this point.  So we can skip one element
+      // (Note i = i +2)
+    for (int i = 3; i <= sqrt(n); i = i+2)
+    {
+        // While i divides n, print i and divide n
+        while (n%i == 0)
+        {
+            n = n/i;
+            if(size>0){
+                int * temp = realloc(*array,sizeof(int)*(size+1));
+                if(!temp){
+                    fprintf(stderr,"ERROR temp array is NULL\n");
+                    exit(1);
+                }
+                **array = *temp;
+            }
+            (*array[size]) = i;
+            size++;
+        }
+    }
+
+    // This condition is to handle the case whien n is a prime number
+    // greater than 2
+    if (n > 2){
+        if(size>0){
+            int * temp = realloc(*array,sizeof(int)*(size+1));
+            if(!temp){
+                fprintf(stderr,"ERROR temp array is NULL\n");
+                exit(1);
+            }
+            **array = *temp;
+        }
+
+        (*array)[size] = n;
+        size++;
+    }
+    return size;    // n must be odd at this point.  So we can skip
+
+}
+
+
+
