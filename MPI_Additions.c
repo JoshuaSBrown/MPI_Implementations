@@ -8,9 +8,11 @@
 #include <mpi.h>
 #include <math.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <stdio.h>
+#include <stdbool.h>
 
-#include "MPI_Additions"
+#include "MPI_Additions.h"
 
 /****************************************************
  * File Constants                                   *
@@ -22,13 +24,15 @@ static int _my_proc;
 
 static int _my_grid_coord[3]; //Position of _my_rank in grid
 static int _grid_dim[3];      //Overal Dimensions of grid
-static int _my_local_dim[3];  //Local dimension of the spatial
+static float _my_local_dim[3];  //Local dimension of the spatial
+static float _dim[3];        //Dimensions of system
+
 // region that _my_rank is responsible for
 
 static bool _log;
 static char _my_rank_log[100];
 static int _my_fd;
-static int _my_pos;
+static fpos_t _my_pos;
 
 MPI_Status  _status;
 
@@ -122,7 +126,7 @@ static inline void _send(int number, void ** data, void (*fun)(int, void **)){
     return;
   }
   #endif
-  if(log){
+  if(_log){
 
   }
 
@@ -138,7 +142,7 @@ static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
     return;
   }
   #endif
-  if(log){
+  if(_log){
 
   }
   (*fun)(number,data);
@@ -219,7 +223,7 @@ int pingpong(int test_type,
     double t_start = MPI_Wtime();
 
     _pingpong(num_bytes,
-              bytes,
+              (void **) bytes,
               &_sendChar,
               &_recvChar);
 
@@ -264,22 +268,23 @@ void calibrateGrid(float Dimensions[3], int GridDim){
     return;
   }
 
+  // Store the dimensions of the system
+  _dim[0] = Dimensions[0];
+  _dim[1] = Dimensions[1];
+  _dim[2] = Dimensions[2];
+
   // Determine if lattice can be split
   // up in a 1d 2d or 3d lattice
   int proc_max;
   int proc_mid;
   int proc_min;
 
-  int grid_hei;
-  int grid_wid;
-  int grid_len;
-
   /* Following section determines how best to split up
    * the system, it is assumed that the work will be
    * distributed evenly across the system */
   int * array = malloc(sizeof(int));
 
-  int len_array = primeFactors(num_proc, &array);
+  int len_array = primeFactors(_my_proc, &array);
 
   for(int i=0;i<len_array;i++){
     printf("array[%d] %d\n",i,array[i]);
@@ -306,6 +311,10 @@ void calibrateGrid(float Dimensions[3], int GridDim){
       val3 = array[i]*val3;
     }
   }
+
+  int grid_len;
+  int grid_wid;
+  int grid_hei;
 
   /* Here we are mapping the processors to the dimensions */
   if(val1>=val2 && val1>= val3){
@@ -338,18 +347,18 @@ void calibrateGrid(float Dimensions[3], int GridDim){
     }
   }
 
-  if(len>=wid && len>=hei){
+  if(_dim[0]>=_dim[1] && _dim[0]>=_dim[2]){
     grid_len = proc_max;
-    if(wid>=hei){
+    if(_dim[1]>=_dim[2]){
       grid_wid = proc_mid;
       grid_hei = proc_min;
     }else{
       grid_hei = proc_mid;
       grid_wid = proc_min;
     }
-  }else if(wid>=len && wid>=hei){
+  }else if(_dim[1]>=_dim[0] && _dim[1]>=_dim[2]){
     grid_wid = proc_max;
-    if(len>=hei){
+    if(_dim[0]>=_dim[2]){
       grid_len = proc_mid;
       grid_hei = proc_min;
     }else{
@@ -358,7 +367,7 @@ void calibrateGrid(float Dimensions[3], int GridDim){
     }
   }else{
     grid_hei = proc_max;
-    if(len>=wid){
+    if(_dim[0]>=_dim[1]){
       grid_len = proc_mid;
       grid_wid = proc_min;
     }else{
@@ -372,38 +381,21 @@ void calibrateGrid(float Dimensions[3], int GridDim){
   _grid_dim[1] = grid_wid;
   _grid_dim[2] = grid_hei;
 
-  int local_len = len / _grid_dim[0];
-  int local_wid = wid / _grid_dim[1];
-  int local_hei = hei / _grid_dim[2];
+  _my_local_dim[0] = _dim[0] / ((float)_grid_dim[0]);
+  _my_local_dim[1] = _dim[1] / ((float)_grid_dim[1]);
+  _my_local_dim[2] = _dim[2] / ((float)_grid_dim[2]);
 
   /* Determine where current rank fits into the grid */
   _my_grid_coord[0] = _my_rank % _grid_dim[0];
   _my_grid_coord[1] = (_my_rank % (_grid_dim[0]*_grid_dim[1]))/_grid_dim[0];
   _my_grid_coord[2] = _my_rank / (_grid_dim[0]*_grid_dim[1]);
 
-  //Determine how to split up grid
-  //Add extra based on rank
-  if( len % _grid_dim[0] > _my_grid_coord[0] ){
-    local_len++;
-  }
-  if( wid % _grid_dim[1] > _my_grid_coord[1] ){
-    local_wid++;
-  }
-  if( hei % _grid_dim[2] > _my_grid_coord[2] ){
-    local_hei++;
-  }
-
-  _my_local_dim[0] = local_len;
-  _my_local_dim[1] = local_wid;
-  _my_local_dim[2] = local_hei;
-
-  printf("rank %d local_len %d local_wid %d local_hei %d\n",_my_rank,local_len,_my_local_wid,local_hei);
-  printf("rank %d grid_len %d grid_wid %d grid_hei
-%d\n",_my_rank,_my_grid_dim[0],_my_grid_dim[1],_my_grid_dim[2]);
+  printf("rank %d local_len %f local_wid %f local_hei %f\n",_my_rank,_my_local_dim[0],_my_local_dim[1],_my_local_dim[2]);
+  printf("rank %d grid_coord %d %d %d\n",_my_rank,_my_grid_coord[0],_my_grid_coord[1],_my_grid_coord[2]);
 
   free(array);
 
-  return 0;
+  return;
 }
 
 /****************************************************
@@ -418,7 +410,10 @@ void switchStdout(void){
   fflush(stdout);
   fgetpos(stdout,&_my_pos);
   _my_fd = dup(fileno(stdout));
-  freopen(_my_rank_log,"w",stdout);
+  FILE * fp = freopen(_my_rank_log,"w",stdout);
+  if(!fp){
+    fprintf(stderr,"Unable to redirect from stdout to file\n");
+  }
 }
 
 // Function designed to switch from print to 
@@ -443,7 +438,7 @@ static inline double _stdDev(double mean, double val, int iter){
 /* External Functions                               */
 int calcStats(int iter,double val,double stats[4]){
   stats[0] += val;                                     // sum
-  stats[1]  = sum[0]/(iter+1);                         // running mean
+  stats[1]  = stats[0]/(iter+1);                       // running mean
   stats[2]  = _stdDev(stats[1],val,iter);              // standard deviation
   stats[3]  = 1.96*stats[2]/pow((double)iter,1.0/2.0); // error
   return 0;
@@ -462,6 +457,8 @@ int genStatFile( char * file_name,
   fprintf(fp,"Dev %12g ",stats[2]);
   fprintf(fp,"Error+- %12g\n",stats[3]);
   fclose(fp);
+
+  return 0;
 }
 
 /****************************************************
