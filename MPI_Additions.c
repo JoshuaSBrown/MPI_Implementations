@@ -93,6 +93,9 @@ static inline void _recvInt(int number, void ** data){
 
 static inline void _sendChar(int number, void ** data){
 
+
+  printf("rank %d _dest %d number send %d\n",_my_rank,_dest,number);
+  fflush( stdout );
   char * chars = (char *)data;
 
   MPI_Send(chars         ,
@@ -105,6 +108,8 @@ static inline void _sendChar(int number, void ** data){
 
 static inline void _recvChar(int number, void ** data){
 
+  printf("rank %d _source %d number recv %d\n",_my_rank,_source,number);
+  fflush( stdout );
   char * chars = (char *) data;
 
   MPI_Recv(chars         ,
@@ -129,8 +134,11 @@ static inline void _send(int number, void ** data, void (*fun)(int, void **)){
   if(_log){
 
   }
-
+  printf("_send my_rank %d number %d\n",_my_rank,number);
+  fflush( stdout );
   (*fun)(number,data);
+  printf("_send my_rank %d number %d\n",_my_rank,number);
+  fflush( stdout );
 }
 
 static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
@@ -145,7 +153,11 @@ static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
   if(_log){
 
   }
+  printf("_recv my_rank %d number %d\n",_my_rank,number);
+  fflush( stdout );
   (*fun)(number,data);
+  printf("_recv my_rank %d number %d\n",_my_rank,number);
+  fflush( stdout );
 }
 
 static inline void _send_recv(int number,
@@ -196,9 +208,10 @@ static inline void _pingpong(int number,
 /* test_type 1 - is linear increase in size          *
  * test_type ~1 - is an exponential increase in size */
 // res_lin is the resolution 
-int pingpong(int test_type,
-             int max_byte ,
-             int res_lin  ){
+int pingpong(int test_type   ,
+             int max_byte    ,
+             int res_lin     ,
+             double max_err_perc){
 
   if(max_byte<0){
     fprintf(stderr,"ERROR max_byte is less than 0\n");
@@ -215,23 +228,48 @@ int pingpong(int test_type,
 
   while(num_bytes<max_byte){
 
+    double stats[4] = { 0 };
+    double err_perc = 100;
+
+    int    iter     = 0;
     // Allocate memory
     bytes = realloc(bytes,sizeof(char)*num_bytes);
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    while(err_perc > max_err_perc){
+      MPI_Barrier(MPI_COMM_WORLD);
 
-    double t_start = MPI_Wtime();
+      double t_start = MPI_Wtime();
 
-    _pingpong(num_bytes,
-              (void **) bytes,
-              &_sendChar,
-              &_recvChar);
+      printf("rank %d num_bytes %d b\n",_my_rank,num_bytes);
+      _pingpong(num_bytes,
+          (void **) bytes,
+          &_sendChar,
+          &_recvChar);
 
-    double t_finish = MPI_Wtime();
+      double t_finish = MPI_Wtime();
+      if(_my_rank==0){
+        // Divide by 2.0 because there are a total of two messages
+        // message one from proc 0 to 1 and then from proc 1 to 0.
+        double t_elapsed = (t_finish-t_start)/2.0;
+        printf("rank %d num_bytes %d a\n",_my_rank,num_bytes);
+        // Finished first iteration of message passing
+        iter++;
+        calcStats(iter,t_elapsed,stats);
+        // Determine if the error in proportion to the mean
+        err_perc = stats[3]/stats[1]*100.0;
+        MPI_Send(&err_perc, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+      }else{
+        MPI_Recv(&err_perc, 1, MPI_DOUBLE, 0, 0,MPI_COMM_WORLD,&_status);
+      }
+    }
 
-    // Divide by 2.0 because there are a total of two messages
-    // message one from proc 0 to 1 and then from proc 1 to 0.
-    double t_elapsed = (t_finish-t_start)/2.0;
+    // Store run in a line in a file
+    if(_my_rank==0){
+      genStatFile("PerformancePingPong.txt",
+                  iter,
+                  num_bytes,
+                  stats);
+    }
 
     // Linear increase in message size
     if(test_type){
@@ -261,13 +299,38 @@ void init_MPI_Additions(void){
 // dimensiosn we are allowed to map the processor grid too
 // if GridDim is 2 even if we have a volume we are mapping 
 // to the actual processor grid will be two dimensional 
-void calibrateGrid(float Dimensions[3], int GridDim){
+int calibrateGrid(float Dimensions[3], int GridDim){
 
   if( Dimensions[0] < 0 || Dimensions[1] < 0 || Dimensions[2] < 0){
     fprintf(stderr,"ERROR Dimension less than 0 in calibrateGrid\n");
-    return;
+    return -1;
   }
+  
+  {
+    int maxGridDim = 3;
+    if(Dimensions[0] ==0 ){
+      maxGridDim--;
+    }
+    if(Dimensions[1] == 0){
+      maxGridDim--;
+    }
+    if(Dimensions[2] == 0){
+      maxGridDim--;
+    }
 
+    if(maxGridDim<GridDim){
+      fprintf(stderr,"ERROR maxGridDim allowed is %d you have "
+                     "specified a gridDim of %d. Cannot map a "
+                     "System of size %g,%g,%g to %d Grid      "
+                     "dimensions\n.",maxGridDim,GridDim,
+                     Dimensions[0],Dimensions[1],Dimensions[2],
+                     GridDim);
+      return -1;
+    }
+  }
+  // Determine if any of the dimensions of the physical system are 
+  // 0. This will limit the total GridDim allowed. 
+  
   // Store the dimensions of the system
   _dim[0] = Dimensions[0];
   _dim[1] = Dimensions[1];
@@ -395,7 +458,7 @@ void calibrateGrid(float Dimensions[3], int GridDim){
 
   free(array);
 
-  return;
+  return 0;
 }
 
 /****************************************************

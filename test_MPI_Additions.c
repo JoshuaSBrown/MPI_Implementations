@@ -7,7 +7,7 @@ int main(void){
 
   MPI_Init(NULL, NULL);
   init_MPI_Additions();
-  pingpong(1,10000,20);
+  pingpong(1,10000,20,5.0);
   MPI_Finalize();
 
   return 0;
