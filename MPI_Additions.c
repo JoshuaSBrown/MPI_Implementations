@@ -596,8 +596,339 @@ int primeFactors(int n, int ** array){
         size++;
     }
     return size;    // n must be odd at this point.  So we can skip
-
 }
 
 
+/* Passes integers between neighbors
+ * hig is passed to the neighbor above
+ * low is passed to the neighbor below
+ * the value of hig is received by the
+ * integer neigh_hig
+ * the value of low is received by the
+ * integer neigh_low
+ * Direction specfies the direction
+ * that the communication will take
+ * place where:
+ * 0 - x direction
+ * 1 - y direction
+ * 2 - z direction
+ * num_int - number of integers */
+int MPI_Communicate_Neighbors(int const * low,
+                              int const * hig,
+                              int * neigh_low,
+                              int * neigh_hig,
+                              int const Direction,
+                              MPI_Request *request_l_recv,
+                              MPI_Request *request_l_send,
+                              MPI_Request *request_h_recv,
+                              MPI_Request *request_h_send,
+                              int const num_int){
 
+  if(Direction>2 || Direction<0){
+    fprintf(stderr,"ERROR Direction must be a number between 0 and 2:\n"
+                       "0 - x dim\n"
+                       "1 - y dim\n"
+                       "2 - z dim\n");
+    MPI_Abort(MPI_COMM_WORLD,1);
+  }
+  /************************************/
+  /* Even processors communicate with
+   * odd processors to the right */
+
+  /* 0 -> 1   2 ->
+   * Processor 0 must receive from 2 */
+  int neigh;
+  int tag = 0;
+
+  int change_x = 0;
+  int change_y = 0;
+  int change_z = 0;
+  if(Direction==0){
+    change_x++;
+  }else if(Direction==1){
+    change_y++;
+  }else if(Direction==2){
+    change_z++;
+  }
+
+  fflush(stdout);
+  printf("rank %d up_x %d up_y %d up_z %d\n",_my_rank,
+      get_proc_rank(_my_grid_coord[0]+1,_my_grid_coord[1],_my_grid_coord[2])==MPI_PROC_NULL ? _my_rank : get_proc_rank(_my_grid_coord[0]+1,_my_grid_coord[1],_my_grid_coord[2]),
+      get_proc_rank(_my_grid_coord[0],_my_grid_coord[1]+1,_my_grid_coord[2])==MPI_PROC_NULL ? _my_rank : get_proc_rank(_my_grid_coord[0],_my_grid_coord[1]+1,_my_grid_coord[2]),
+      get_proc_rank(_my_grid_coord[0],_my_grid_coord[1],_my_grid_coord[2]+1)==MPI_PROC_NULL ? _my_rank : get_proc_rank(_my_grid_coord[0],_my_grid_coord[1],_my_grid_coord[2]+1));
+  fflush(stdout);
+  printf("_grid_dim %d %d %d\n",_grid_dim[0],_grid_dim[1],_grid_dim[2]);
+  if(_my_grid_coord[Direction]%2==0){
+    /* Even Send to right */
+    neigh = get_proc_rank(_my_grid_coord[0]+change_x,
+        _my_grid_coord[1]+change_y,
+        _my_grid_coord[2]+change_z);
+
+    printf("my_rank %d send %d tag %d hig %d\n",_my_rank,
+neigh,tag,*hig);
+    //MPI_Send(&hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+    MPI_Isend(hig,num_int,MPI_INT,
+        neigh,
+        tag,
+        MPI_COMM_WORLD,
+        request_h_send);
+    /* If odd number of dimensions in the x grid direction
+     * rank 0 must also receive after sending */
+    if(_grid_dim[Direction]%2!=0 && _my_grid_coord[Direction]==0){
+      /* 0 receive from left */
+      neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+          _my_grid_coord[1]-change_y,
+          _my_grid_coord[2]-change_z);
+
+      printf("my_rank %d recv %d tag %d\n",_my_rank, neigh,tag);
+      MPI_Irecv(neigh_hig,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_h_recv);
+      //MPI_Recv(&neigh_hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+      printf("my_rank %d receiving from neigh %d neigh_hig, %d\n",_my_rank,neigh,*neigh_hig);
+    }
+  }else{
+    /* Odd receive from left */
+    neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+        _my_grid_coord[1]-change_y,
+        _my_grid_coord[2]-change_z);
+
+    printf("my_rank %d recv %d tag %d\n",_my_rank, neigh,tag);
+    MPI_Irecv(neigh_hig,num_int,MPI_INT,
+        neigh,
+        tag,
+        MPI_COMM_WORLD,
+        request_h_recv);
+    //MPI_Recv(&neigh_hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+    printf("my_rank %d receiving from neigh %d neigh_hig, %d\n",_my_rank,neigh, *neigh_hig);
+  }
+
+  /* Send to the other neighbor on the x side */
+  /* 0 <- 1   2 <-
+   * Processor 0 must receive from 2 */
+  tag = 1;
+  if(_my_grid_coord[Direction]%2==0){
+    /* Even receive from right */
+    neigh = get_proc_rank(_my_grid_coord[0]+change_x,
+        _my_grid_coord[1]+change_y,
+        _my_grid_coord[2]+change_z);
+    printf("my_rank %d recv %d tag %d\n",_my_rank, neigh,tag);
+    MPI_Irecv(neigh_low,num_int,MPI_INT,
+        neigh,
+        tag,
+        MPI_COMM_WORLD,
+        request_l_recv);
+    //MPI_Recv(&neigh_low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+    printf("my_rank %d receiving from neigh %d neigh_low, %d\n",_my_rank,neigh,*neigh_low);
+
+    /* If odd number of dimensions in the x grid direction
+     * rank 0 must also send after receiving */
+    if(_grid_dim[Direction]%2!=0 && _my_grid_coord[Direction]==0){
+      /* 0 send to left*/
+      neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+          _my_grid_coord[1]-change_y,
+          _my_grid_coord[2]-change_z);
+      printf("my_rank %d send %d tag %d low %d\n",_my_rank,
+neigh,tag,*low);
+      MPI_Isend(low,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_l_send);
+      //MPI_Send(&low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+      printf("my_rank %d sending low %d\n",_my_rank, *low);
+
+    }
+  }else{
+    /* Odd send to left */
+    neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+        _my_grid_coord[1]-change_y,
+        _my_grid_coord[2]-change_z);
+
+    printf("my_rank %d send %d tag %d low %d\n",_my_rank,
+neigh,tag,*low);
+    MPI_Isend(low,num_int,MPI_INT,
+        neigh,
+        tag,
+        MPI_COMM_WORLD,
+        request_l_send);
+    //MPI_Send(&low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+    printf("my_rank %d sending low %d\n",_my_rank,*low);
+  }
+
+  /************************************/
+  /* Even processors communicate with
+   * odd processors to the left */
+  /* Now we must communicate in the other direction */
+  fflush(stdout);
+  /* 0    1 <- 2 */
+  /* If even
+   * 0    1 <- 2    3 <-*/
+  tag = 4;
+  if(_grid_dim[Direction]%2==1){
+    if(_my_grid_coord[Direction]%2==0){
+      if(_my_grid_coord[Direction]!=0){
+        /* Even Send to left with the exception of proc-
+         * essor 0 which has alread sent */
+        neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+            _my_grid_coord[1]-change_y,
+            _my_grid_coord[2]-change_z);
+        printf("my_rank %d send %d \n",_my_rank, neigh);
+        fflush(stdout);
+        MPI_Isend(low,num_int,MPI_INT,
+            neigh,
+            tag,
+            MPI_COMM_WORLD,
+            request_l_send);
+        //MPI_Send(&low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+        printf("my_rank %d sending low %d\n",_my_rank,*low);
+      }
+    }else{
+      /* Odd receive from the right */
+      neigh = get_proc_rank(_my_grid_coord[0]+change_x,
+          _my_grid_coord[1]+change_y,
+          _my_grid_coord[2]+change_z);
+
+      printf("my_rank %d recv %d \n",_my_rank, neigh);
+      fflush(stdout);
+      MPI_Irecv(neigh_low,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_l_recv);
+      //MPI_Recv(&neigh_low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+      printf("my_rank %d recv from neigh %d neigh_low %d\n",_my_rank,neigh,*neigh_low);
+    }
+  }else{
+    if(_my_grid_coord[Direction]%2==0){
+      /* Even Send to left with the exception of proc-
+       * essor 0 which has alread sent */
+      neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+          _my_grid_coord[1]-change_y,
+          _my_grid_coord[2]-change_z);
+      printf("my_rank %d send %d \n",_my_rank, neigh);
+      fflush(stdout);
+      MPI_Isend(low,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_l_send);
+      //MPI_Send(&low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+      printf("my_rank %d sending low %d\n",_my_rank,*low);
+    }else{
+      /* Odd receive from the right */
+      neigh = get_proc_rank(_my_grid_coord[0]+change_x,
+          _my_grid_coord[1]+change_y,
+          _my_grid_coord[2]+change_z);
+
+      printf("my_rank %d recv %d \n",_my_rank, neigh);
+      fflush(stdout);
+      MPI_Irecv(neigh_low,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_l_recv);
+      //MPI_Recv(&neigh_low,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+      printf("my_rank %d recv from neigh %d neigh_low %d\n",_my_rank,neigh,*neigh_low);
+    }
+
+
+  }
+  /* Odd number of grid dimensions */
+  /* 0    1 -> 2 */
+  /* Even number of grid dimensions
+   * 0    1 -> 2   3 -> */
+  tag = 5;
+  if(_grid_dim[Direction]%2==1){
+    if(_my_grid_coord[Direction]%2!=0){
+      /* Odd send to right */
+      neigh = get_proc_rank(_my_grid_coord[0]+change_x,
+          _my_grid_coord[1]+change_y,
+          _my_grid_coord[2]+change_z);
+
+      printf("my_rank %d send %d \n",_my_rank, neigh);
+      fflush(stdout);
+      MPI_Isend(hig,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_h_send);
+      //MPI_Send(&hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+    }else{
+
+      if(_my_grid_coord[Direction]!=0){
+        /* Even receive from the left with the exception
+         * of processor 0 which has already received from
+         * the left if odd number of processors */
+        neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+            _my_grid_coord[1]-change_y,
+            _my_grid_coord[2]-change_z);
+
+        printf("my_rank %d recv %d \n",_my_rank, neigh);
+        fflush(stdout);
+        MPI_Irecv(neigh_hig,num_int,MPI_INT,
+            neigh,
+            tag,
+            MPI_COMM_WORLD,
+            request_h_recv);
+        //MPI_Recv(&neigh_hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+      }
+    }
+  }else{
+    if(_my_grid_coord[Direction]%2!=0){
+      /* Odd send to right */
+      neigh = get_proc_rank(_my_grid_coord[0]+change_x,
+          _my_grid_coord[1]+change_y,
+          _my_grid_coord[2]+change_z);
+
+      printf("my_rank %d send %d \n",_my_rank, neigh);
+      fflush(stdout);
+      MPI_Isend(hig,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_h_send);
+      //MPI_Send(&hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD);
+    }else{
+
+      /* Even receive from the left with the exception
+       * of processor 0 which has already received from
+       * the left if odd number of processors */
+      neigh = get_proc_rank(_my_grid_coord[0]-change_x,
+          _my_grid_coord[1]-change_y,
+          _my_grid_coord[2]-change_z);
+
+      printf("my_rank %d recv %d \n",_my_rank, neigh);
+      fflush(stdout);
+      MPI_Irecv(neigh_hig,num_int,MPI_INT,
+          neigh,
+          tag,
+          MPI_COMM_WORLD,
+          request_h_recv);
+      //MPI_Recv(&neigh_hig,1,MPI_INT,neigh,tag,MPI_COMM_WORLD,&status);
+    }
+
+  }
+
+  printf("neigh_hig %d neigh_low %d\n",*neigh_hig,*neigh_low);
+  return 0;
+}
+
+int get_proc_rank(int grid_coord_x,int grid_coord_y, int grid_coord_z){
+  /* Apply Periodic conditions */
+  grid_coord_x = (grid_coord_x+_grid_dim[0])%_grid_dim[0];
+  grid_coord_y = (grid_coord_y+_grid_dim[1])%_grid_dim[1];
+  grid_coord_z = (grid_coord_z+_grid_dim[2])%_grid_dim[2];
+
+  int val = _grid_dim[0]*_grid_dim[1]*grid_coord_z+_grid_dim[0]*grid_coord_y+grid_coord_x;
+  printf("grid_coord_x %d grid_coord_y %d grid_coord_z %d dimx %d dimy %d dimz %d rank %d\n",
+      grid_coord_x, grid_coord_y,grid_coord_z,_grid_dim[0],_grid_dim[1],_grid_dim[2],val);
+
+  if(val==_my_rank){
+    val = MPI_PROC_NULL;
+  }
+
+  return val;
+}

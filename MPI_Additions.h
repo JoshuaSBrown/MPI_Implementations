@@ -95,3 +95,34 @@ void switchStdout(void);
  * to the terminal again the following function  *
  * can be called.                                */
 void revertStdout(void);
+
+/* Passes integers between neighbors
+ * hig is passed to the neighbor above
+ * low is passed to the neighbor below
+ * the value of hig is received by the
+ * integer neigh_hig
+ * the value of low is received by the
+ * integer neigh_low
+ * Direction specfies the direction
+ * that the communication will take
+ * place where:
+ * 0 - x direction
+ * 1 - y direction
+ * 2 - z direction
+ * num_int - number of integers */
+int MPI_Communicate_Neighbors(int const * low,
+                              int const * hig,
+                              int * neigh_low,
+                              int * neigh_hig,
+                              int const Direction,
+                              MPI_Request *request_l_recv,
+                              MPI_Request *request_l_send,
+                              MPI_Request *request_h_recv,
+                              MPI_Request *request_h_send,
+                              int const num_int);
+
+/* This function works once the processor grid *
+ * has been calibrated. For a set of           *
+ * within the processor grid it will get the   *
+ * appropriate rank.                           */
+int get_proc_rank(int grid_coord_x,int grid_coord_y, int grid_coord_z);
