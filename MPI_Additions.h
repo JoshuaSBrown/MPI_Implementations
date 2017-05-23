@@ -5,6 +5,12 @@
  * have file scope.                               */
 void init_MPI_Additions(void);
 
+int getMyRank(void);
+
+int getMyProc(void);
+
+char * getMyRankLog(void);
+
 /* The pingpong function is used to determine the *
  * message passing performance of a parallel      *
  * system by calling MPI_Send and MPI_Recv. The   *
@@ -28,6 +34,8 @@ int pingpong(int test_type,
              int max_byte ,
              int res_lin  ,
              double max_err_perc);
+
+
 
 /* This function works by determining all of the  *
  * prime factors that exist within the interger n.*

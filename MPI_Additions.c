@@ -22,16 +22,16 @@ static int _source;
 static int _my_rank;
 static int _my_proc;
 
-static int _my_grid_coord[3]; //Position of _my_rank in grid
-static int _grid_dim[3];      //Overal Dimensions of grid
+static int   _my_grid_coord[3]; //Position of _my_rank in grid
+static int   _grid_dim[3];      //Overal Dimensions of grid
 static float _my_local_dim[3];  //Local dimension of the spatial
-static float _dim[3];        //Dimensions of system
+static float _dim[3];           //Dimensions of system
 
 // region that _my_rank is responsible for
 
-static bool _log;
-static char _my_rank_log[100];
-static int _my_fd;
+static bool   _log;
+static char   _my_rank_log[100];
+static int    _my_fd;
 static fpos_t _my_pos;
 
 MPI_Status  _status;
@@ -93,9 +93,6 @@ static inline void _recvInt(int number, void ** data){
 
 static inline void _sendChar(int number, void ** data){
 
-
-  printf("rank %d _dest %d number send %d\n",_my_rank,_dest,number);
-  fflush( stdout );
   char * chars = (char *)data;
 
   MPI_Send(chars         ,
@@ -108,8 +105,6 @@ static inline void _sendChar(int number, void ** data){
 
 static inline void _recvChar(int number, void ** data){
 
-  printf("rank %d _source %d number recv %d\n",_my_rank,_source,number);
-  fflush( stdout );
   char * chars = (char *) data;
 
   MPI_Recv(chars         ,
@@ -134,11 +129,7 @@ static inline void _send(int number, void ** data, void (*fun)(int, void **)){
   if(_log){
 
   }
-  printf("_send my_rank %d number %d\n",_my_rank,number);
-  fflush( stdout );
   (*fun)(number,data);
-  printf("_send my_rank %d number %d\n",_my_rank,number);
-  fflush( stdout );
 }
 
 static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
@@ -153,11 +144,7 @@ static inline void _recv(int number, void ** data, void (*fun)(int, void **)){
   if(_log){
 
   }
-  printf("_recv my_rank %d number %d\n",_my_rank,number);
-  fflush( stdout );
   (*fun)(number,data);
-  printf("_recv my_rank %d number %d\n",_my_rank,number);
-  fflush( stdout );
 }
 
 static inline void _send_recv(int number,
@@ -213,76 +200,93 @@ int pingpong(int test_type   ,
              int res_lin     ,
              double max_err_perc){
 
+  if(_my_proc<2){
+    fprintf(stderr,"ERROR need at least two processors to"
+                   " use the pingpong function\n");
+    return -1;
+  }
   if(max_byte<0){
     fprintf(stderr,"ERROR max_byte is less than 0\n");
     return -1;
   }
+  if(res_lin<2 && test_type){
+    fprintf(stderr,"ERROR linear resolution or res_lin must"
+                   " be greater than two when test_type is "
+                   "not 0.\n");
+    return -1;
+  }
+  if(max_err_perc<0){
+    fprintf(stderr,"ERROR max error percent must be a non "
+                   "negative number\n");
+    return -1;
+  }
+  // Only runs with the first two processors
+  if(_my_rank<2){
 
-  int power     = 0;
-  int num_bytes = 0;
-  int inc_bytes = max_byte/res_lin;
+    int power     = 0;
+    int num_bytes = 0;
+    int inc_bytes = max_byte/res_lin;
 
-  char * bytes = NULL;
-
-  // Linear increase in message size
-
-  while(num_bytes<max_byte){
-
-    double stats[4] = { 0 };
-    double err_perc = 100;
-
-    int    iter     = 0;
-    // Allocate memory
-    bytes = realloc(bytes,sizeof(char)*num_bytes);
-
-    while(err_perc > max_err_perc){
-      MPI_Barrier(MPI_COMM_WORLD);
-
-      double t_start = MPI_Wtime();
-
-      printf("rank %d num_bytes %d b\n",_my_rank,num_bytes);
-      _pingpong(num_bytes,
-          (void **) bytes,
-          &_sendChar,
-          &_recvChar);
-
-      double t_finish = MPI_Wtime();
-      if(_my_rank==0){
-        // Divide by 2.0 because there are a total of two messages
-        // message one from proc 0 to 1 and then from proc 1 to 0.
-        double t_elapsed = (t_finish-t_start)/2.0;
-        printf("rank %d num_bytes %d a\n",_my_rank,num_bytes);
-        // Finished first iteration of message passing
-        iter++;
-        calcStats(iter,t_elapsed,stats);
-        // Determine if the error in proportion to the mean
-        err_perc = stats[3]/stats[1]*100.0;
-        MPI_Send(&err_perc, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
-      }else{
-        MPI_Recv(&err_perc, 1, MPI_DOUBLE, 0, 0,MPI_COMM_WORLD,&_status);
-      }
-    }
-
-    // Store run in a line in a file
-    if(_my_rank==0){
-      genStatFile("PerformancePingPong.txt",
-                  iter,
-                  num_bytes,
-                  stats);
-    }
+    char * bytes = NULL;
 
     // Linear increase in message size
-    if(test_type){
-      num_bytes += inc_bytes;
-    // else exponential increase in data size
-    }else{
-      num_bytes = (int) pow(2.0,power);
-      power++;
+
+    while(num_bytes<max_byte){
+
+      double stats[4] = { 0 };
+      double err_perc = 100;
+
+      int    iter     = 0;
+      // Allocate memory
+      bytes = realloc(bytes,sizeof(char)*num_bytes);
+
+      while(err_perc > max_err_perc){
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        double t_start = MPI_Wtime();
+
+        _pingpong(num_bytes,
+            (void **) bytes,
+            &_sendChar,
+            &_recvChar);
+
+        double t_finish = MPI_Wtime();
+        if(_my_rank==0){
+          // Divide by 2.0 because there are a total of two messages
+          // message one from proc 0 to 1 and then from proc 1 to 0.
+          double t_elapsed = (t_finish-t_start)/2.0;
+          // Finished first iteration of message passing
+          iter++;
+          calcStats(iter,t_elapsed,stats);
+          // Determine if the error in proportion to the mean
+          err_perc = stats[3]/stats[1]*100.0;
+          MPI_Send(&err_perc, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+        }else{
+          MPI_Recv(&err_perc, 1, MPI_DOUBLE, 0, 0,MPI_COMM_WORLD,&_status);
+        }
+      }
+
+      // Store run in a line in a file
+      if(_my_rank==0){
+        genStatFile("PerformancePingPong.txt",
+            iter,
+            num_bytes,
+            stats);
+      }
+
+      // Linear increase in message size
+      if(test_type){
+        num_bytes += inc_bytes;
+        // else exponential increase in data size
+      }else{
+        num_bytes = (int) pow(2.0,power);
+        power++;
+      }
+
     }
 
+    if(bytes) free(bytes);
   }
-
-  if(bytes) free(bytes);
 
   return 0;
 }
@@ -291,6 +295,18 @@ void init_MPI_Additions(void){
   MPI_Comm_rank(MPI_COMM_WORLD,&_my_rank);
   MPI_Comm_size(MPI_COMM_WORLD,&_my_proc);
   sprintf(_my_rank_log,"file_num%d.log",_my_rank);
+}
+
+int getMyRank(void){
+  return _my_rank;
+}
+
+int getMyProc(void){
+  return _my_proc;
+}
+
+char * getMyRankLog(void){
+  return &_my_rank_log[0];
 }
 
 // If given a volume, this function will 
@@ -305,7 +321,10 @@ int calibrateGrid(float Dimensions[3], int GridDim){
     fprintf(stderr,"ERROR Dimension less than 0 in calibrateGrid\n");
     return -1;
   }
-  
+  if(GridDim<1){
+    fprintf(stderr,"ERROR lowest allowed grid dimension is 1\n");
+    return -1;
+  } 
   {
     int maxGridDim = 3;
     if(Dimensions[0] ==0 ){
@@ -532,70 +551,91 @@ int genStatFile( char * file_name,
 /* External Functions                               */
 
 /* Function is designed to print all prime factors  *
- * a given number n                                 */
+ * a given number n, and return them to the int **  *
+ * ptr designated by array. This function will      *
+ * return the size of the array upon completion.    *
+ * array must be created using dynamically allocated*
+ * memory for the size of one int i.e.              *
+ *                                                  *
+ * int * array = malloc(sizeof(int));               *
+ * primeFactors(5,&array);                          *
+ *                                                  */
 int primeFactors(int n, int ** array){
 
-  if(!array) return -1;
- 
-  
-    int size = 0;
-    if(n==1) {
-        (*array)[0] = 1;
-        return 1;
-    }
-    // Print the number of 2s that divide n
-    while (n%2 == 0){
-        n = n/2;
-        if(size>0){
-            int * temp = realloc(*array,sizeof(int)*(size+1));
-            if(!temp){
-                fprintf(stderr,"ERROR temp array is NULL\n");
-                exit(1);
-            }
-            *array = temp;
-        }
+  if(!array) {
+    fprintf(stderr,"ERROR array is NULL\n");
+    return -1;
+  }
+  if(n<1){
+    fprintf(stderr,"ERROR n must be a non negative "
+                   "integer\n");
+    return -1;
+  }
 
-        (*array)[size] = 2;
-        size++;
+  int size = 0;
+  int capacity = 1;
+  (*array)[0] = 1;
+  size++;
+
+  if(n==1) {
+    return 1;
+  }
+  // Print the number of 2s that divide n
+  while (n%2 == 0){
+    n = n/2;
+    if(size>=capacity){
+      capacity = size*2+1;
+      int * temp = realloc(*array,sizeof(int)*capacity);
+      if(!temp){
+        fprintf(stderr,"ERROR temp array is NULL\n");
+        exit(1);
+      }
+      *array = temp;
     }
 
-      // n must be odd at this point.  So we can skip one element
-      // (Note i = i +2)
-    for (int i = 3; i <= sqrt(n); i = i+2)
+    (*array)[size] = 2;
+    size++;
+  }
+
+  // n must be odd at this point.  So we can skip one element
+  // (Note i = i +2)
+  for (int i = 3; i <= sqrt(n); i = i+2)
+  {
+    // While i divides n, print i and divide n
+    while (n%i == 0)
     {
-        // While i divides n, print i and divide n
-        while (n%i == 0)
-        {
-            n = n/i;
-            if(size>0){
-                int * temp = realloc(*array,sizeof(int)*(size+1));
-                if(!temp){
-                    fprintf(stderr,"ERROR temp array is NULL\n");
-                    exit(1);
-                }
-                **array = *temp;
-            }
-            (*array[size]) = i;
-            size++;
+      n = n/i;
+      if(size>=capacity){
+        capacity = size*2+1;
+        int * temp = realloc(*array,sizeof(int)*capacity);
+        if(!temp){
+          fprintf(stderr,"ERROR temp array is NULL\n");
+          exit(1);
         }
+        **array = *temp;
+      }
+      (*array)[size] = i;
+      size++;
+    }
+  }
+
+  // This condition is to handle the case whien n is a prime number
+  // greater than 2
+  if (n > 2){
+    if(size>=capacity){
+      capacity = size*2+1;
+      int * temp = realloc(*array,sizeof(int)*capacity);
+      if(!temp){
+        fprintf(stderr,"ERROR temp array is NULL\n");
+        exit(1);
+      }
+      **array = *temp;
     }
 
-    // This condition is to handle the case whien n is a prime number
-    // greater than 2
-    if (n > 2){
-        if(size>0){
-            int * temp = realloc(*array,sizeof(int)*(size+1));
-            if(!temp){
-                fprintf(stderr,"ERROR temp array is NULL\n");
-                exit(1);
-            }
-            **array = *temp;
-        }
-
-        (*array)[size] = n;
-        size++;
-    }
-    return size;    // n must be odd at this point.  So we can skip
+    (*array)[size] = n;
+    size++;
+  }
+  return size;    // n must be odd at this point.  So we can skip
 }
 
 
