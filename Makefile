@@ -11,4 +11,4 @@ MPI_Additions.o : MPI_Additions.c
 
 .PHONY : clean
 clean :
-		$(RM) *.o test_MPI_Additions PerformancePingPong.txt
+		$(RM) *.o test_MPI_Additions PerformancePingPong.txt file_num*.log

@@ -200,26 +200,40 @@ int pingpong(int test_type   ,
              int res_lin     ,
              double max_err_perc){
 
+  #ifdef _ERROR_CHECKING_ON_
   if(_my_proc<2){
     fprintf(stderr,"ERROR need at least two processors to"
                    " use the pingpong function\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
   if(max_byte<0){
     fprintf(stderr,"ERROR max_byte is less than 0\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
   if(res_lin<2 && test_type){
     fprintf(stderr,"ERROR linear resolution or res_lin must"
                    " be greater than two when test_type is "
                    "not 0.\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
   if(max_err_perc<0){
     fprintf(stderr,"ERROR max error percent must be a non "
                    "negative number\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
+  #endif
   // Only runs with the first two processors
   if(_my_rank<2){
 
@@ -317,12 +331,19 @@ char * getMyRankLog(void){
 // to the actual processor grid will be two dimensional 
 int calibrateGrid(float Dimensions[3], int GridDim){
 
+  #ifdef _ERROR_CHECKING_ON_
   if( Dimensions[0] < 0 || Dimensions[1] < 0 || Dimensions[2] < 0){
     fprintf(stderr,"ERROR Dimension less than 0 in calibrateGrid\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
   if(GridDim<1){
     fprintf(stderr,"ERROR lowest allowed grid dimension is 1\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   } 
   {
@@ -344,9 +365,13 @@ int calibrateGrid(float Dimensions[3], int GridDim){
                      "dimensions\n.",maxGridDim,GridDim,
                      Dimensions[0],Dimensions[1],Dimensions[2],
                      GridDim);
+      #ifdef _FORCE_HARD_CRASH_
+      exit(1);
+      #endif
       return -1;
     }
   }
+  #endif
   // Determine if any of the dimensions of the physical system are 
   // 0. This will limit the total GridDim allowed. 
   
@@ -562,15 +587,23 @@ int genStatFile( char * file_name,
  *                                                  */
 int primeFactors(int n, int ** array){
 
+  #ifdef _ERROR_CHECKING_ON_
   if(!array) {
     fprintf(stderr,"ERROR array is NULL\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
   if(n<1){
     fprintf(stderr,"ERROR n must be a non negative "
                    "integer\n");
+    #ifdef _FORCE_HARD_CRASH_
+    exit(1);
+    #endif
     return -1;
   }
+  #endif
 
   int size = 0;
   int capacity = 1;
