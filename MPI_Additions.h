@@ -9,6 +9,12 @@ int getMyRank(void);
 
 int getMyProc(void);
 
+/* This will return the coordinates of the current*
+ * processor in the context of the grid           */
+int getMyGridX(void);
+int getMyGridY(void);
+int getMyGridZ(void);
+
 char * getMyRankLog(void);
 
 /* The pingpong function is used to determine the *

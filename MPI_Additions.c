@@ -35,6 +35,7 @@ static int    _my_fd;
 static fpos_t _my_pos;
 
 MPI_Status  _status;
+MPI_Group   _world_group;
 
 /****************************************************
  * MPI Functions                                    *
@@ -234,9 +235,19 @@ int pingpong(int test_type   ,
     return -1;
   }
   #endif
+
+  // Create a Group consisting of only the first two processors
+  const int ranks[2] = {0, 1};
+  MPI_Group group_01;
+  MPI_Group_incl(_world_group,2,ranks,&group_01);
+  // Create a new communicator based on the group
+  MPI_Comm MPI_01_COMM;
+  MPI_Comm_create_group(MPI_COMM_WORLD,group_01,0,&MPI_01_COMM);
+
+
   // Only runs with the first two processors
   if(_my_rank<2){
-
+    
     int power     = 0;
     int num_bytes = 0;
     int inc_bytes = max_byte/res_lin;
@@ -255,7 +266,8 @@ int pingpong(int test_type   ,
       bytes = realloc(bytes,sizeof(char)*num_bytes);
 
       while(err_perc > max_err_perc){
-        MPI_Barrier(MPI_COMM_WORLD);
+        // Only block the two processors in the 01 Communicator
+        MPI_Barrier(MPI_01_COMM);
 
         double t_start = MPI_Wtime();
 
@@ -274,9 +286,9 @@ int pingpong(int test_type   ,
           calcStats(iter,t_elapsed,stats);
           // Determine if the error in proportion to the mean
           err_perc = stats[3]/stats[1]*100.0;
-          MPI_Send(&err_perc, 1, MPI_DOUBLE, 1, 0, MPI_COMM_WORLD);
+          MPI_Send(&err_perc, 1, MPI_DOUBLE, 1, 0, MPI_01_COMM);
         }else{
-          MPI_Recv(&err_perc, 1, MPI_DOUBLE, 0, 0,MPI_COMM_WORLD,&_status);
+          MPI_Recv(&err_perc, 1, MPI_DOUBLE, 0, 0,MPI_01_COMM,&_status);
         }
       }
 
@@ -302,17 +314,37 @@ int pingpong(int test_type   ,
     if(bytes) free(bytes);
   }
 
+  MPI_Group_free(&group_01);
+  MPI_Comm_free(&MPI_01_COMM);
+
   return 0;
 }
 
 void init_MPI_Additions(void){
   MPI_Comm_rank(MPI_COMM_WORLD,&_my_rank);
   MPI_Comm_size(MPI_COMM_WORLD,&_my_proc);
+  MPI_Comm_group(MPI_COMM_WORLD,&_world_group);
   sprintf(_my_rank_log,"file_num%d.log",_my_rank);
+}
+
+void clean_MPI_Additions(void){
+  MPI_Group_free(&_world_group);
 }
 
 int getMyRank(void){
   return _my_rank;
+}
+
+int getMyGridX(void){
+  return _my_grid_coord[0];
+}
+
+int getMyGridY(void){
+  return _my_grid_coord[1];
+}
+
+int getMyGridZ(void){
+  return _my_grid_coord[2];
 }
 
 int getMyProc(void){
@@ -392,10 +424,6 @@ int calibrateGrid(float Dimensions[3], int GridDim){
   int * array = malloc(sizeof(int));
 
   int len_array = primeFactors(_my_proc, &array);
-
-  for(int i=0;i<len_array;i++){
-    printf("array[%d] %d\n",i,array[i]);
-  }
 
   int val1 = 1;
   int val2 = 1;

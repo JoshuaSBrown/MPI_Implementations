@@ -14,7 +14,7 @@ int main(void){
   printf("Log:  %s\n",getMyRankLog());
 
   printf("Testing: pingpong\n");
-  {
+  if(getMyRank()<2){
     int rv = pingpong(1,10000,20,5.0);
     assert(rv==0);
     rv = pingpong(1,-1,20,5.0);
@@ -66,6 +66,43 @@ int main(void){
     assert(array[1]==2);
     assert(array[2]==3);
     free(array);
+  }
+
+  printf("Testing: calibrateGrid\n");
+  if(getMyProc()!=4){
+    printf("Will not run calibrateGrid test because you must specify 4 processors and you have specified %d processors\n",getMyProc());
+  }else{
+    float Dims[3] = { 100.0, 100.0, 100};
+    calibrateGrid( Dims, 2);
+    if(getMyRank()==0){
+      int x = getMyGridX();
+      int y = getMyGridY();
+      int z = getMyGridZ();
+      assert(x==0);
+      assert(y==0);
+      assert(z==0);
+    }else if(getMyRank()==1){
+      int x = getMyGridX();
+      int y = getMyGridY();
+      int z = getMyGridZ();
+      assert(x==1);
+      assert(y==0);
+      assert(z==0);
+    }else if(getMyRank()==2){
+      int x = getMyGridX();
+      int y = getMyGridY();
+      int z = getMyGridZ();
+      assert(x==0);
+      assert(y==1);
+      assert(z==0);
+    }else if(getMyRank()==3){
+      int x = getMyGridX();
+      int y = getMyGridY();
+      int z = getMyGridZ();
+      assert(x==1);
+      assert(y==1);
+      assert(z==0);
+    }
   }
 
   MPI_Finalize();
